@@ -160,6 +160,63 @@ class TestStdioTransport:
         transport.close()
         transport.close()  # Should not raise
 
+    def test_env_vars_passed_to_subprocess(self, tmp_path):
+        """Env vars provided to StdioTransport reach the subprocess."""
+        script = tmp_path / "env_server.py"
+        script.write_text(
+            textwrap.dedent("""\
+            import sys
+            import json
+            import os
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                req = json.loads(line)
+                resp = {
+                    "jsonrpc": "2.0",
+                    "id": req.get("id", 0),
+                    "result": {"env_value": os.environ.get("JARVIS_TEST_VAR", "")},
+                }
+                sys.stdout.write(json.dumps(resp) + "\\n")
+                sys.stdout.flush()
+        """)
+        )
+
+        env = {**dict(__import__("os").environ), "JARVIS_TEST_VAR": "hello-from-env"}
+        transport = StdioTransport([sys.executable, str(script)], env=env)
+        try:
+            req = MCPRequest(method="test/env", id=1)
+            resp = transport.send(req)
+            assert resp.error is None
+            assert resp.result["env_value"] == "hello-from-env"
+        finally:
+            transport.close()
+
+    def test_env_defaults_to_none(self, tmp_path):
+        """StdioTransport works without an explicit env argument."""
+        script = tmp_path / "echo_server.py"
+        script.write_text(
+            textwrap.dedent("""\
+            import sys, json
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                req = json.loads(line)
+                sys.stdout.write(json.dumps(
+                    {"jsonrpc": "2.0", "id": req.get("id", 0), "result": {}}
+                ) + "\\n")
+                sys.stdout.flush()
+        """)
+        )
+        transport = StdioTransport([sys.executable, str(script)])  # no env kwarg
+        try:
+            resp = transport.send(MCPRequest(method="test", id=1))
+            assert resp.error is None
+        finally:
+            transport.close()
+
 
 class TestStreamableHTTPTransport:
     """Tests for StreamableHTTPTransport (also aliased as SSETransport)."""

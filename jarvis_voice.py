@@ -18,7 +18,6 @@ import argparse
 import logging
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -35,10 +34,15 @@ WHISPER_MODEL = "base"
 SOUL_PATH = Path.home() / ".openjarvis" / "SOUL.md"
 USER_PATH = Path.home() / ".openjarvis" / "USER.md"
 
+# Lazy-loaded singletons — initialized on first use
+_whisper_model = None
+_tts_pipeline = None
+
 
 # ---------------------------------------------------------------------------
 # Model routing
 # ---------------------------------------------------------------------------
+
 
 def _resolve_model(requested: Optional[str]) -> Tuple[str, str]:
     """Return (engine_key, model_id) for the requested model name.
@@ -68,6 +72,7 @@ def _resolve_model(requested: Optional[str]) -> Tuple[str, str]:
 # Audio helpers
 # ---------------------------------------------------------------------------
 
+
 def record_until_enter() -> np.ndarray:
     print("\n[Listening... press Enter to stop]")
     chunks: List[np.ndarray] = []
@@ -83,32 +88,38 @@ def record_until_enter() -> np.ndarray:
     ):
         input()
 
-    return np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 1), dtype="float32")
+    return (
+        np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 1), dtype="float32")
+    )
 
 
 def transcribe(audio: np.ndarray) -> str:
+    global _whisper_model
     from faster_whisper import WhisperModel
 
-    if not hasattr(transcribe, "_model"):
+    if _whisper_model is None:
         print("[Loading Whisper...]")
-        transcribe._model = WhisperModel(WHISPER_MODEL, device="auto", compute_type="float32")
+        _whisper_model = WhisperModel(
+            WHISPER_MODEL, device="auto", compute_type="float32"
+        )
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         sf.write(f.name, audio, SAMPLE_RATE)
         tmp_path = f.name
 
-    segments, _ = transcribe._model.transcribe(tmp_path)
+    segments, _ = _whisper_model.transcribe(tmp_path)
     return "".join(seg.text for seg in segments).strip()
 
 
 def speak(text: str) -> None:
+    global _tts_pipeline
     from kokoro import KPipeline
 
-    if not hasattr(speak, "_pipe"):
-        speak._pipe = KPipeline(lang_code="b")
+    if _tts_pipeline is None:
+        _tts_pipeline = KPipeline(lang_code="b")
 
     samples = []
-    for _, _, audio in speak._pipe(text, voice="bm_george"):
+    for _, _, audio in _tts_pipeline(text, voice="bm_george"):
         samples.append(audio)
 
     if not samples:
@@ -125,6 +136,7 @@ def speak(text: str) -> None:
 # ---------------------------------------------------------------------------
 # Agent + tool setup
 # ---------------------------------------------------------------------------
+
 
 def _load_system_prompt() -> str:
     parts = []
@@ -208,6 +220,7 @@ def build_agent(engine_key: str, model: str, enable_mcp: bool = True):
     if enable_mcp:
         try:
             from openjarvis.mcp.claude_bridge import load_mcp_tools
+
             mcp_tools, mcp_clients = load_mcp_tools()
             tools.extend(mcp_tools)
         except Exception as exc:
@@ -236,6 +249,7 @@ def build_agent(engine_key: str, model: str, enable_mcp: bool = True):
 # Per-turn memory injection
 # ---------------------------------------------------------------------------
 
+
 def _inject_memory(query: str, memory_backend, config) -> Optional[str]:
     if memory_backend is None:
         return None
@@ -258,6 +272,7 @@ def _inject_memory(query: str, memory_backend, config) -> Optional[str]:
 # Session (persistent conversation across turns)
 # ---------------------------------------------------------------------------
 
+
 class Session:
     def __init__(self):
         self._history: List[Tuple[str, str]] = []  # (role, content)
@@ -279,7 +294,8 @@ class Session:
             ctx.conversation.add(
                 Message(
                     role=Role.SYSTEM,
-                    content="Relevant context from the knowledge base:\n\n" + kb_context,
+                    content="Relevant context from the knowledge base:\n\n"
+                    + kb_context,
                 )
             )
 
@@ -294,6 +310,7 @@ class Session:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis voice assistant")

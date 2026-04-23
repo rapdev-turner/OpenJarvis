@@ -71,7 +71,9 @@ def load_mcp_tools(
     for name in target:
         cfg = configs.get(name)
         if not cfg:
-            logger.warning("MCP server '%s' not found in Claude config — skipping", name)
+            logger.warning(
+                "MCP server '%s' not found in Claude config — skipping", name
+            )
             continue
 
         command = cfg.get("command")
@@ -93,10 +95,9 @@ def load_mcp_tools(
             server_tools = MCPToolProvider(client).discover()
             clients.append(client)
             tools.extend(server_tools)
-            print(f"[MCP] {name}: {len(server_tools)} tools")
+            logger.info("MCP server '%s': %d tools loaded", name, len(server_tools))
         except Exception as exc:
             logger.warning("Failed to connect to MCP server '%s': %s", name, exc)
-            print(f"[MCP] {name}: failed — {exc}")
 
     return tools, clients
 
