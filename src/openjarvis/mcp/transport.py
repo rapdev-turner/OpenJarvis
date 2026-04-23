@@ -58,8 +58,13 @@ class StdioTransport(MCPTransport):
     stdin/stdout.
     """
 
-    def __init__(self, command: List[str]) -> None:
+    def __init__(
+        self,
+        command: List[str],
+        env: Optional[dict] = None,
+    ) -> None:
         self._command = command
+        self._env = env
         self._process: Optional[subprocess.Popen[str]] = None
         self._start()
 
@@ -71,6 +76,7 @@ class StdioTransport(MCPTransport):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=self._env,
         )
 
     def send(self, request: MCPRequest) -> MCPResponse:
